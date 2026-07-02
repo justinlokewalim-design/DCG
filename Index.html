@@ -1,0 +1,1187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DimMetric Generator</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root {
+  --bg:      #0F1117;
+  --surf:    #1A1D27;
+  --surf2:   #22263A;
+  --surf3:   #2A2F47;
+  --border:  #2E3450;
+  --accent:  #0EA5E9;
+  --accent2: #7C3AED;
+  --success: #10B981;
+  --warn:    #F59E0B;
+  --danger:  #EF4444;
+  --text:    #F1F5F9;
+  --muted:   #64748B;
+  --muted2:  #94A3B8;
+  --olive:   #4B7A3C;
+  --olive-bg:#E2EFDA;
+  --blue-bg: #DBEAFE;
+  --green-bg:#DCFCE7;
+  --yellow-bg:#FEF9C3;
+  --pink-bg: #FCE7F3;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; }
+
+/* ── Layout ─────────────────────────────────────────── */
+.app { display: flex; height: 100vh; overflow: hidden; }
+.sidebar { width: 340px; min-width: 300px; background: var(--surf); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.results-pane { flex: 1; overflow-y: auto; padding: 20px 24px; }
+.chat-pane { height: 380px; min-height: 320px; border-top: 1px solid var(--border); display: flex; flex-direction: column; background: var(--surf); }
+
+/* ── Sidebar ─────────────────────────────────────────── */
+.sidebar-header { padding: 20px 20px 14px; border-bottom: 1px solid var(--border); }
+.logo { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.logo-icon { width: 32px; height: 32px; background: linear-gradient(135deg, var(--accent), var(--accent2)); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.logo-text { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; }
+.logo-sub { font-size: 11px; color: var(--muted); letter-spacing: 0.5px; text-transform: uppercase; }
+.sidebar-scroll { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+
+/* ── Upload zone ─────────────────────────────────────── */
+.upload-zone { border: 2px dashed var(--border); border-radius: 12px; padding: 24px 16px; text-align: center; cursor: pointer; transition: all .2s; position: relative; }
+.upload-zone:hover, .upload-zone.drag-over { border-color: var(--accent); background: rgba(14,165,233,.05); }
+.upload-zone.has-file { border-style: solid; border-color: var(--success); background: rgba(16,185,129,.06); }
+.upload-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.upload-icon { font-size: 28px; margin-bottom: 8px; }
+.upload-title { font-weight: 600; font-size: 13px; margin-bottom: 3px; }
+.upload-hint { color: var(--muted); font-size: 11.5px; }
+.file-name { color: var(--success); font-size: 12px; font-weight: 600; margin-top: 6px; word-break: break-all; }
+
+/* ── Pipeline flow ───────────────────────────────────── */
+.pipeline-label { font-size: 10.5px; font-weight: 700; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; }
+.pipeline { display: flex; flex-direction: column; gap: 0; }
+.pipe-step { display: flex; align-items: flex-start; gap: 10px; }
+.pipe-connector { display: flex; flex-direction: column; align-items: center; width: 28px; flex-shrink: 0; }
+.pipe-node { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: var(--muted); background: var(--surf2); transition: all .4s; flex-shrink: 0; }
+.pipe-node.active { border-color: var(--accent); color: var(--accent); background: rgba(14,165,233,.1); box-shadow: 0 0 12px rgba(14,165,233,.3); }
+.pipe-node.done { border-color: var(--success); color: var(--success); background: rgba(16,185,129,.1); }
+.pipe-node.running { border-color: var(--warn); color: var(--warn); animation: pulse 1s infinite; }
+.pipe-line { width: 2px; flex: 1; min-height: 20px; background: var(--border); margin: 3px 0; transition: background .4s; }
+.pipe-line.done { background: var(--success); }
+.pipe-line.active { background: linear-gradient(to bottom, var(--success), var(--accent)); }
+.pipe-body { padding: 4px 0 20px; }
+.pipe-title { font-weight: 600; font-size: 13px; }
+.pipe-desc { color: var(--muted2); font-size: 11.5px; margin-top: 2px; }
+.pipe-status { font-size: 11px; margin-top: 4px; }
+.pipe-status.ok { color: var(--success); }
+.pipe-status.running { color: var(--warn); }
+.pipe-status.err { color: var(--danger); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+/* ── Colour legend ───────────────────────────────────── */
+.legend-grid { display: flex; flex-direction: column; gap: 5px; }
+.legend-row { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
+.swatch { width: 16px; height: 16px; border-radius: 3px; border: 1px solid rgba(255,255,255,.12); flex-shrink: 0; }
+
+/* ── Project input ───────────────────────────────────── */
+.field-label { font-size: 11.5px; color: var(--muted2); margin-bottom: 5px; font-weight: 600; letter-spacing: 0.3px; }
+.field-input { width: 100%; background: var(--surf2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; color: var(--text); font-size: 13px; outline: none; transition: border-color .2s; }
+.field-input:focus { border-color: var(--accent); }
+
+/* ── Run button ──────────────────────────────────────── */
+.btn-run { width: 100%; padding: 11px; background: linear-gradient(135deg, var(--accent), #0284C7); border: none; border-radius: 10px; color: white; font-weight: 700; font-size: 14px; cursor: pointer; transition: all .2s; letter-spacing: 0.3px; }
+.btn-run:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(14,165,233,.35); }
+.btn-run:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+.btn-dl { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 12px; background: var(--surf2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12.5px; font-weight: 600; cursor: pointer; transition: all .2s; }
+.btn-dl:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.btn-dl:disabled { opacity: .35; cursor: not-allowed; }
+.btn-dl .dl-icon { font-size: 14px; }
+.dl-group { display: flex; flex-direction: column; gap: 6px; }
+
+/* ── Results pane ────────────────────────────────────── */
+.results-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.results-title { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
+.tab-bar { display: flex; gap: 4px; background: var(--surf); border-radius: 8px; padding: 3px; }
+.tab { padding: 5px 14px; border-radius: 6px; font-size: 12.5px; font-weight: 600; cursor: pointer; color: var(--muted); transition: all .2s; border: none; background: none; }
+.tab.active { background: var(--surf2); color: var(--text); }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* ── Tables in results ───────────────────────────────── */
+.data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.data-table th { background: var(--surf2); padding: 8px 12px; text-align: left; font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: 0.5px; text-transform: uppercase; border-bottom: 1px solid var(--border); }
+.data-table td { padding: 7px 12px; border-bottom: 1px solid rgba(46,52,80,.6); font-size: 12px; vertical-align: top; }
+.data-table tr:hover td { background: rgba(14,165,233,.04); }
+.data-table .mono { font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 11px; }
+.badge { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 10.5px; font-weight: 700; }
+.badge-group { background: rgba(124,58,237,.2); color: #A78BFA; }
+.badge-list  { background: rgba(14,165,233,.15); color: #38BDF8; }
+.badge-dim   { background: rgba(14,165,233,.1); color: var(--accent); }
+.badge-formula { background: rgba(239,68,68,.1); color: #FCA5A5; }
+.badge-open  { background: rgba(16,185,129,.1); color: var(--success); }
+.badge-metric { background: rgba(245,158,11,.1); color: #FCD34D; }
+.cell-olive { background: rgba(75,122,60,.2); color: #86EFAC; font-size: 10.5px; }
+.empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+.empty-icon { font-size: 40px; margin-bottom: 12px; opacity: .4; }
+.empty-text { font-size: 14px; }
+.empty-sub  { font-size: 12px; margin-top: 6px; color: var(--muted); }
+
+/* ── Stats bar ───────────────────────────────────────── */
+.stats-bar { display: flex; gap: 12px; margin-bottom: 20px; }
+.stat-card { flex: 1; background: var(--surf); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.stat-num { font-size: 22px; font-weight: 800; letter-spacing: -1px; }
+.stat-lbl { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.stat-accent { color: var(--accent); }
+.stat-violet { color: var(--accent2); }
+.stat-green  { color: var(--success); }
+
+/* ── Chat pane ───────────────────────────────────────── */
+.chat-header { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+.chat-title { font-size: 13px; font-weight: 700; }
+.chat-badge { font-size: 10px; background: rgba(124,58,237,.2); color: #A78BFA; padding: 2px 7px; border-radius: 4px; font-weight: 600; }
+.chat-api-status { margin-left: auto; font-size: 11px; color: var(--muted); }
+.chat-messages { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+.msg { max-width: 88%; display: flex; flex-direction: column; gap: 3px; }
+.msg.user { align-self: flex-end; }
+.msg.ai   { align-self: flex-start; }
+.msg-bubble { padding: 9px 13px; border-radius: 12px; font-size: 13px; line-height: 1.55; }
+.msg.user .msg-bubble { background: linear-gradient(135deg, var(--accent), #0284C7); color: white; border-bottom-right-radius: 4px; }
+.msg.ai   .msg-bubble { background: var(--surf2); color: var(--text); border-bottom-left-radius: 4px; border: 1px solid var(--border); }
+.msg.ai   .msg-bubble.thinking { color: var(--muted); font-style: italic; }
+.msg-time { font-size: 10px; color: var(--muted); padding: 0 4px; }
+.msg.user .msg-time { text-align: right; }
+.chat-input-row { padding: 10px 14px; border-top: 1px solid var(--border); display: flex; gap: 8px; align-items: flex-end; }
+.chat-input { flex: 1; background: var(--surf2); border: 1px solid var(--border); border-radius: 10px; padding: 9px 13px; color: var(--text); font-size: 13px; resize: none; outline: none; max-height: 100px; min-height: 38px; font-family: inherit; line-height: 1.4; transition: border-color .2s; }
+.chat-input:focus { border-color: var(--accent); }
+.chat-send { width: 38px; height: 38px; background: linear-gradient(135deg, var(--accent), #0284C7); border: none; border-radius: 9px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all .2s; }
+.chat-send:hover:not(:disabled) { transform: scale(1.05); box-shadow: 0 2px 10px rgba(14,165,233,.4); }
+.chat-send:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+.chat-send svg { color: white; }
+.api-key-row { display: flex; gap: 6px; align-items: center; }
+.api-key-input { flex: 1; background: var(--surf2); border: 1px solid var(--border); border-radius: 7px; padding: 6px 10px; color: var(--text); font-size: 12px; outline: none; }
+.api-key-input:focus { border-color: var(--accent2); }
+.btn-small { padding: 5px 12px; border-radius: 7px; font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid var(--border); background: var(--surf2); color: var(--muted2); transition: all .2s; }
+.btn-small:hover { border-color: var(--accent2); color: var(--accent2); }
+.btn-small.active { background: rgba(124,58,237,.15); border-color: var(--accent2); color: #A78BFA; }
+
+/* ── Colour-coded cell display ───────────────────────── */
+.cell-display { display: inline-block; padding: 2px 6px; border-radius: 3px; font-family: monospace; font-size: 11px; }
+.cell-olive-d  { background: #E2EFDA; color: #1a3d12; }
+.cell-blue-d   { background: #DBEAFE; color: #1e3a8a; }
+.cell-green-d  { background: #DCFCE7; color: #14532d; }
+.cell-yellow-d { background: #FEF9C3; color: #713f12; }
+.cell-pink-d   { background: #FCE7F3; color: #831843; }
+
+/* ── Code block ──────────────────────────────────────── */
+pre.code-block { background: #0D1117; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; font-size: 11.5px; overflow-x: auto; color: #a9b7c6; line-height: 1.6; margin: 6px 0; }
+.kw { color: #cc7832; } .str { color: #6a8759; } .num { color: #6897bb; } .cm { color: var(--muted); }
+
+/* ── Scrollbar ───────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* ── Divider / section ───────────────────────────────── */
+.section-title { font-size: 10.5px; font-weight: 700; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; }
+hr.divider { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
+.info-box { background: rgba(14,165,233,.07); border: 1px solid rgba(14,165,233,.2); border-radius: 8px; padding: 10px 12px; font-size: 12px; color: var(--muted2); }
+.info-box strong { color: var(--accent); }
+
+/* ── Collapsible sections in results ─────────────────── */
+details.result-block { background: var(--surf); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 14px; overflow: hidden; }
+details.result-block summary { padding: 12px 16px; cursor: pointer; font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 8px; user-select: none; list-style: none; }
+details.result-block summary::-webkit-details-marker { display: none; }
+details.result-block summary::before { content: '▶'; font-size: 10px; color: var(--muted); transition: transform .2s; }
+details.result-block[open] summary::before { transform: rotate(90deg); }
+details.result-block .detail-body { padding: 0 0 12px; border-top: 1px solid var(--border); }
+.row-count { margin-left: auto; font-size: 11px; color: var(--muted); font-weight: 400; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ══ SIDEBAR ══════════════════════════════════════════════ -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <div class="logo-icon">⚙</div>
+        <div>
+          <div class="logo-text">DimMetric</div>
+          <div class="logo-sub">Generator v2</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-scroll">
+
+      <!-- Project Name -->
+      <div>
+        <div class="field-label">PROJECT NAME</div>
+        <input class="field-input" id="projName" type="text" value="" placeholder="e.g. MyProject" />
+      </div>
+
+      <!-- Upload -->
+      <div>
+        <div class="field-label">SURVEY EXCEL FILE</div>
+        <div class="upload-zone" id="uploadZone">
+          <input type="file" id="fileInput" accept=".xlsx,.xls" />
+          <div class="upload-icon">📊</div>
+          <div class="upload-title">Drop .xlsx file here</div>
+          <div class="upload-hint">or click to browse</div>
+          <div class="file-name" id="fileName"></div>
+        </div>
+      </div>
+
+      <!-- Run -->
+      <button class="btn-run" id="runBtn" disabled onclick="runPipeline()">
+        ▶ Run Pipeline
+      </button>
+
+      <!-- Pipeline status -->
+      <div>
+        <div class="pipeline-label">Pipeline Status</div>
+        <div class="pipeline" id="pipelineStatus">
+          <div class="pipe-step">
+            <div class="pipe-connector">
+              <div class="pipe-node" id="pA">A</div>
+              <div class="pipe-line" id="lineAB"></div>
+            </div>
+            <div class="pipe-body">
+              <div class="pipe-title">Part A — Survey Form</div>
+              <div class="pipe-desc">Detect markers, colours, headers</div>
+              <div class="pipe-status" id="statusA">—</div>
+            </div>
+          </div>
+          <div class="pipe-step">
+            <div class="pipe-connector">
+              <div class="pipe-node" id="pB">B</div>
+              <div class="pipe-line" id="lineBC"></div>
+            </div>
+            <div class="pipe-body">
+              <div class="pipe-title">Part B — Processor</div>
+              <div class="pipe-desc">Write Dim Y/X, Metrics, Name Manager</div>
+              <div class="pipe-status" id="statusB">—</div>
+            </div>
+          </div>
+          <div class="pipe-step">
+            <div class="pipe-connector">
+              <div class="pipe-node" id="pC">C</div>
+            </div>
+            <div class="pipe-body">
+              <div class="pipe-title">Part C — Data Dictionary</div>
+              <div class="pipe-desc">Generate Schema, Elements, Types</div>
+              <div class="pipe-status" id="statusC">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Downloads -->
+      <div>
+        <div class="field-label">DOWNLOADS</div>
+        <div class="dl-group">
+          <button class="btn-dl" id="dlProcessed" disabled onclick="downloadProcessed()">
+            <span class="dl-icon">⬇</span> <span id="dlProcessedLabel">Processed.xlsx</span>
+          </button>
+          <button class="btn-dl" id="dlDict" disabled onclick="downloadDictionary()">
+            <span class="dl-icon">⬇</span> <span id="dlDictLabel">DataDictionary.xlsx</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Colour legend -->
+      <div>
+        <div class="field-label">COLOUR LEGEND</div>
+        <div class="legend-grid">
+          <div class="legend-row"><div class="swatch" style="background:#E2EFDA"></div><span>TD — Input / Formula cell</span></div>
+          <div class="legend-row"><div class="swatch" style="background:#DBEAFE"></div><span>Y — Dim Y row label</span></div>
+          <div class="legend-row"><div class="swatch" style="background:#DCFCE7"></div><span>X — Dim X col label</span></div>
+          <div class="legend-row"><div class="swatch" style="background:#FEF9C3"></div><span>X — Generic Metric</span></div>
+          <div class="legend-row"><div class="swatch" style="background:#FCE7F3"></div><span>Y — Formula Metric</span></div>
+        </div>
+      </div>
+
+      <hr class="divider">
+
+      <!-- Chat API key -->
+      <div>
+        <div class="field-label">CLAUDE API KEY (for chat)</div>
+        <div class="api-key-row">
+          <input class="api-key-input" id="apiKey" type="password" placeholder="sk-ant-api03-..." />
+          <button class="btn-small" id="apiKeyBtn" onclick="saveApiKey()">Save</button>
+        </div>
+        <div style="color:var(--muted);font-size:11px;margin-top:5px;">Used only in your browser — never stored remotely.</div>
+      </div>
+
+    </div>
+  </aside>
+
+  <!-- ══ MAIN ═════════════════════════════════════════════════ -->
+  <div class="main">
+
+    <!-- Results pane -->
+    <div class="results-pane" id="resultsPane">
+      <div class="results-header">
+        <div class="results-title">Results</div>
+        <div class="tab-bar" id="tabBar">
+          <button class="tab active" onclick="switchTab('overview')">Overview</button>
+          <button class="tab" onclick="switchTab('namemgr')">Name Manager</button>
+          <button class="tab" onclick="switchTab('elements')">Elements</button>
+          <button class="tab" onclick="switchTab('enums')">Enumerations</button>
+          <button class="tab" onclick="switchTab('datatypes')">Data Types</button>
+        </div>
+      </div>
+
+      <!-- OVERVIEW -->
+      <div class="tab-content active" id="tab-overview">
+        <div id="overviewContent">
+          <div class="empty-state">
+            <div class="empty-icon">⚙️</div>
+            <div class="empty-text">No file processed yet</div>
+            <div class="empty-sub">Upload a survey Excel file and click Run Pipeline</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- NAME MANAGER -->
+      <div class="tab-content" id="tab-namemgr">
+        <div id="namemgrContent">
+          <div class="empty-state">
+            <div class="empty-icon">📋</div>
+            <div class="empty-text">Name Manager entries will appear here</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ELEMENTS -->
+      <div class="tab-content" id="tab-elements">
+        <div id="elementsContent">
+          <div class="empty-state">
+            <div class="empty-icon">🗂️</div>
+            <div class="empty-text">Data Dictionary Elements will appear here</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ENUMERATIONS -->
+      <div class="tab-content" id="tab-enums">
+        <div id="enumsContent">
+          <div class="empty-state">
+            <div class="empty-icon">🏷️</div>
+            <div class="empty-text">Enumerations will appear here</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DATA TYPES -->
+      <div class="tab-content" id="tab-datatypes">
+        <div id="datatypesContent">
+          <div class="empty-state">
+            <div class="empty-icon">🔢</div>
+            <div class="empty-text">Data Types will appear here</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chat pane -->
+    <div class="chat-pane">
+      <div class="chat-header">
+        <span style="font-size:15px">💬</span>
+        <span class="chat-title">Ask about your data</span>
+        <span class="chat-badge">Claude AI</span>
+        <span class="chat-api-status" id="apiStatus">No API key saved</span>
+      </div>
+      <div class="chat-messages" id="chatMessages">
+        <div class="msg ai">
+          <div class="msg-bubble">
+            👋 Hello! I'm your DimMetric assistant. Upload a survey file and run the pipeline, then ask me anything about the output — why a GG was classified as a Formula group, what a specific metric name means, or how to interpret the Elements sheet.
+          </div>
+        </div>
+      </div>
+      <div class="chat-input-row">
+        <textarea class="chat-input" id="chatInput" placeholder="Ask about the pipeline output..." rows="1"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"
+          oninput="autoResize(this)"></textarea>
+        <button class="chat-send" id="chatSend" onclick="sendChat()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════════
+let uploadedFile = null;
+let workbookData = null;  // raw XLSX workbook
+let pipelineResult = null;  // processed output
+let apiKey = localStorage.getItem('dmg_apikey') || '';
+let chatHistory = [];
+
+if (apiKey) {
+  document.getElementById('apiKey').value = '••••••••••••••••';
+  document.getElementById('apiStatus').textContent = 'API key saved ✓';
+  document.getElementById('apiStatus').style.color = 'var(--success)';
+  document.getElementById('apiKeyBtn').classList.add('active');
+}
+
+// ══════════════════════════════════════════════════════════════
+// FILE UPLOAD
+// ══════════════════════════════════════════════════════════════
+const fileInput = document.getElementById('fileInput');
+const uploadZone = document.getElementById('uploadZone');
+
+fileInput.addEventListener('change', e => handleFile(e.target.files[0]));
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop', e => { e.preventDefault(); uploadZone.classList.remove('drag-over'); handleFile(e.dataTransfer.files[0]); });
+
+function handleFile(file) {
+  if (!file) return;
+  uploadedFile = file;
+  uploadZone.classList.add('has-file');
+  document.getElementById('fileName').textContent = '📎 ' + file.name;
+  document.getElementById('runBtn').disabled = false;
+  resetPipeline();
+  pipelineResult = null;
+}
+
+// ══════════════════════════════════════════════════════════════
+// PIPELINE
+// ══════════════════════════════════════════════════════════════
+function resetPipeline() {
+  ['A','B','C'].forEach(p => {
+    setNode(p, ''); document.getElementById('status'+p).textContent = '—'; document.getElementById('status'+p).className = 'pipe-status';
+  });
+  ['AB','BC'].forEach(l => document.getElementById('line'+l).className = 'pipe-line');
+  document.getElementById('dlProcessed').disabled = true;
+  document.getElementById('dlDict').disabled = true;
+}
+
+function setNode(p, state) {
+  const el = document.getElementById('p'+p);
+  el.className = 'pipe-node' + (state ? ' '+state : '');
+}
+
+function setStatus(p, text, cls) {
+  const el = document.getElementById('status'+p);
+  el.textContent = text; el.className = 'pipe-status ' + cls;
+}
+
+async function runPipeline() {
+  if (!uploadedFile) return;
+  document.getElementById('runBtn').disabled = true;
+  resetPipeline();
+  const proj = document.getElementById('projName').value.trim() || 'MyProject';
+
+  try {
+    // Read file
+    setNode('A', 'running'); setStatus('A', 'Reading workbook…', 'running');
+    const ab = await uploadedFile.arrayBuffer();
+    const wb = XLSX.read(ab, { type: 'array', cellStyles: true, cellFormula: true });
+    workbookData = wb;
+    await sleep(300);
+
+    // Part A - detect structure
+    const sheets = wb.SheetNames.filter(s => !['Sheet1','Sheet2','Notes','Instructions','Dropdown_List'].includes(s));
+    setNode('A', 'done'); setStatus('A', `✓ ${sheets.length} survey sheets detected`, 'ok');
+    document.getElementById('lineAB').className = 'pipe-line done';
+
+    // Part B - process
+    setNode('B', 'running'); setStatus('B', 'Generating Dim/Metric labels…', 'running');
+    await sleep(200);
+    const result = await runPartB(wb, proj, sheets);
+    pipelineResult = result;
+    document.getElementById('lineBC').className = 'pipe-line active';
+    setNode('B', 'done'); setStatus('B', `✓ ${result.definedNames.length} Name Manager entries`, 'ok');
+
+    // Part C - data dictionary
+    setNode('C', 'running'); setStatus('C', 'Building Data Dictionary…', 'running');
+    await sleep(300);
+    const ddResult = runPartC(result, proj);
+    pipelineResult.dd = ddResult;
+    setNode('C', 'done'); setStatus('C', `✓ ${ddResult.elements.length} Elements generated`, 'ok');
+
+    // Enable downloads
+    document.getElementById('dlProcessed').disabled = false;
+    document.getElementById('dlDict').disabled = false;
+    document.getElementById('dlProcessedLabel').textContent = proj + '_Processed.xlsx';
+    document.getElementById('dlDictLabel').textContent = proj + '_DataDictionary.xlsx';
+    document.getElementById('runBtn').disabled = false;
+
+    // Render results
+    renderResults(result, ddResult, proj);
+
+    // Inform chat
+    injectPipelineContext(result, ddResult, proj);
+
+  } catch(err) {
+    console.error(err);
+    setNode('B', ''); setStatus('B', '✗ ' + err.message, 'err');
+    document.getElementById('runBtn').disabled = false;
+  }
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ══════════════════════════════════════════════════════════════
+// PART B — CORE PIPELINE LOGIC
+// ══════════════════════════════════════════════════════════════
+function clean(text) {
+  if (!text) return '';
+  let s = String(text).replace(/\n/g,' ').replace(/\r/g,' ');
+  s = s.replace(/\b\d{4}\b/g,'');
+  s = s.replace(/\([^)]*\)/g,'');
+  s = s.replace(/\[[^\]]*\]/g,'');
+  s = s.replace(/S\$\s*mil/gi,'');
+  s = s.replace(/\d+/g,'');
+  s = s.replace(/[:\-\/\\;,.()–—%]/g,' ');
+  const words = s.split(/\s+/).filter(w => w.length >= 2);
+  return words.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join('').substring(0,60);
+}
+
+const SKIP_WORDS = new Set(['of','in','for','by','the','a','an','with','from','to','at','on','as']);
+function abbrev(w) {
+  if (w.length <= 7) return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+  const p = w.substring(0,4);
+  return ('aeiou'.includes(p[3].toLowerCase()) ? w.substring(0,5) : p).replace(/^./, c => c.toUpperCase());
+}
+function tablePrefix(title) {
+  let s = title.replace(/\b[0-9]+[A-Z]+\.?\b/g,'').replace(/\b[A-Z]+[0-9]+\.?\b/g,'')
+               .replace(/\b\d{4}\b/g,'').replace(/[^\w\s]/g,' ');
+  let parts = [];
+  for (const w of s.split(/\s+/)) {
+    const wl = w.toLowerCase();
+    if (!wl || SKIP_WORDS.has(wl)) continue;
+    if (['and','or'].includes(wl)) parts.push(wl.charAt(0).toUpperCase()+wl.slice(1));
+    else parts.push(abbrev(w));
+  }
+  let prefix = parts.join('');
+  if (prefix.length > 28) {
+    prefix = prefix.substring(0,28);
+    for (let i=prefix.length-1;i>0;i--) if (/[A-Z]/.test(prefix[i])) { prefix=prefix.substring(0,i); break; }
+  }
+  return prefix;
+}
+function sanitise(name) { return name.replace(/[^A-Za-z0-9]/g,'_'); }
+
+// Check if a cell has olive green fill (theme=6 tint~0.8) OR explicit #E2EFDA
+function isOlive(cellStyle) {
+  if (!cellStyle) return false;
+  const f = cellStyle.bgColor;
+  if (!f) return false;
+  if (f.theme === 6) return true;
+  if (f.rgb && (f.rgb.toUpperCase() === 'FFE2EFDA' || f.rgb.toUpperCase() === 'E2EFDA')) return true;
+  return false;
+}
+
+function isFormula(cell) {
+  return cell && typeof cell.f === 'string';
+}
+
+function getCellValue(ws, addr) {
+  const cell = ws[addr];
+  if (!cell) return null;
+  return cell.v != null ? cell.v : (cell.f ? '=' + cell.f : null);
+}
+
+async function runPartB(wb, proj, surveySheets) {
+  const definedNames = [];
+  const ggGroups = [];  // for Part C
+  const ddEnums = [];
+  const ddDts = {};
+
+  // Read dropdowns
+  const dlSheet = wb.Sheets['Dropdown_List'];
+  if (dlSheet) {
+    const listDefs = [[1,2,'Fund_Type'],[4,5,'Fund_Vehicle'],[7,8,'OtherJurisdictions']];
+    for (const [lc,kc,lname] of listDefs) {
+      const items = [];
+      for (let r=2; r<=100; r++) {
+        const lv = getCellValue(dlSheet, XLSX.utils.encode_cell({r:r-1,c:lc-1}));
+        if (!lv) break;
+        let key = String(lv).split(/[\s\-]/)[0].substring(0,8);
+        items.push([key.trim(), String(lv).trim()]);
+      }
+      const en = proj+'_'+lname;
+      ddDts[en] = {base:'enumeration', settings:{}};
+      for (const [k,l] of items) ddEnums.push({enumeration:en, key:k, label:l});
+    }
+  }
+
+  for (const sname of surveySheets) {
+    const ws = wb.Sheets[sname];
+    if (!ws) continue;
+    const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
+    const snSafe = sanitise(sname);
+    let ggCount = 0;
+
+    // Scan for [Fixed], [Open], [Metric] markers
+    for (let r=range.s.r; r<=range.e.r; r++) {
+      const a1 = getCellValue(ws, XLSX.utils.encode_cell({r,c:0}));
+      if (!a1) continue;
+      const marker = String(a1).trim().toUpperCase().replace(/\s/g,'');
+      if (!['[FIXED]','[OPEN]','[METRIC]'].includes(marker)) continue;
+
+      ggCount++;
+      const gg = String(ggCount).padStart(2,'0');
+
+      // Find section title (next row with content in col A)
+      let secTitle = '';
+      for (let tr=r+1; tr<=Math.min(r+3,range.e.r); tr++) {
+        const tv = getCellValue(ws, XLSX.utils.encode_cell({r:tr,c:0}));
+        if (tv && !String(tv).toUpperCase().startsWith('[')) { secTitle = String(tv); break; }
+      }
+      if (!secTitle) secTitle = sname;
+      const tp = tablePrefix(secTitle);
+
+      if (marker === '[FIXED]') {
+        // Find col headers and data rows
+        let colHeaders = {};
+        let inputRows = [], formulaRows = [];
+        let lastDataRow = r;
+
+        for (let dr=r+1; dr<=range.e.r; dr++) {
+          const colA = getCellValue(ws, XLSX.utils.encode_cell({r:dr,c:0}));
+          if (colA && String(colA).trim().toUpperCase().replace(/\s/g,'').startsWith('[')) break;
+
+          // Check if any cell in this row is olive
+          let hasOlive = false, hasFormula = false, hasInput = false;
+          let rowType = 'header';
+          for (let c=1; c<=range.e.c; c++) {
+            const cell = ws[XLSX.utils.encode_cell({r:dr,c})];
+            if (!cell) continue;
+            if (isOlive(cell.s || {})) {
+              hasOlive = true;
+              if (isFormula(cell)) hasFormula = true;
+              else hasInput = true;
+            }
+          }
+          if (!hasOlive && !hasInput && !hasFormula) {
+            // Could be col header
+            for (let c=1; c<=range.e.c; c++) {
+              const v = getCellValue(ws, XLSX.utils.encode_cell({r:dr,c}));
+              if (v) colHeaders[c] = clean(String(v));
+            }
+            continue;
+          }
+          lastDataRow = dr;
+          const rowLabel = getCellValue(ws, XLSX.utils.encode_cell({r:dr,c:0}));
+          const rawLabel = rowLabel ? String(rowLabel) : '';
+          const cleanLabel = clean(rawLabel) || `Calc${dr+1}`;
+          const allFormula = !hasInput && hasFormula;
+
+          if (allFormula) {
+            formulaRows.push({r:dr, label:cleanLabel, colHeaders});
+          } else if (hasInput) {
+            inputRows.push({r:dr, label:cleanLabel, hasFormulaCols:hasFormula, colHeaders});
+          }
+        }
+
+        // Determine input cols vs formula cols
+        const inputCols = [];
+        const formulaCols = [];
+        for (const [cidx, chdr] of Object.entries(colHeaders)) {
+          const c = parseInt(cidx);
+          let allFml = true, anyInput = false;
+          for (const ir of inputRows) {
+            const cell = ws[XLSX.utils.encode_cell({r:ir.r,c})];
+            if (!cell) continue;
+            if (isOlive(cell.s||{})) {
+              if (isFormula(cell)) {}
+              else { anyInput = true; allFml = false; }
+            }
+          }
+          if (allFml && !anyInput) formulaCols.push({c, hdr:chdr});
+          else inputCols.push({c, hdr:chdr});
+        }
+
+        // Write results (in-memory annotations)
+        const tdCells = [], yCells = [], xCells = [];
+        let dimYParent = null, dimXParent = null;
+        const hasX = inputCols.length >= 2;
+
+        if (inputRows.length > 0) {
+          dimYParent = `${proj}_${tp}`;
+          if (hasX) dimXParent = `${proj}_${tp}Col`;
+
+          for (const ir of inputRows) {
+            const dimYLabel = `Dim=${proj}_${tp}|${ir.label}`;
+            yCells.push({ r:ir.r, label: dimYLabel, type:'dimY' });
+            ddEnums.push({ enumeration:`${proj}_${tp}`, key:ir.label, label:ir.label });
+
+            for (const ic of inputCols) {
+              tdCells.push({ r:ir.r, c:ic.c });
+            }
+          }
+
+          if (hasX) {
+            for (const ic of inputCols) {
+              xCells.push({ type:'dimX', label:`Dim=${proj}_${tp}Col|${ic.hdr}`, r:lastDataRow+1, c:ic.c });
+              ddEnums.push({ enumeration:`${proj}_${tp}Col`, key:ic.hdr, label:ic.hdr });
+            }
+            for (const ic of inputCols) {
+              xCells.push({ type:'metric', label:`Metric=${proj}_Number`, r:lastDataRow+2, c:ic.c });
+            }
+          } else {
+            xCells.push({ type:'metric', label:`Metric=${proj}_Number`, r:lastDataRow+1, c:1 });
+          }
+
+          ddDts[`${proj}_${tp}`] = {base:'enumeration',settings:{}};
+          if (hasX) ddDts[`${proj}_${tp}Col`] = {base:'enumeration',settings:{}};
+        }
+
+        // Formula rows get individual metrics in Y
+        const fmlyCells = [];
+        for (const fr of formulaRows) {
+          for (const ic of [...inputCols,...formulaCols]) {
+            const cell = ws[XLSX.utils.encode_cell({r:fr.r,c:ic.c})];
+            if (!cell || !isOlive(cell.s||{})) continue;
+            const metricName = `${proj}_${tp}_${fr.label}_${ic.hdr||'Total'}`;
+            fmlyCells.push({ r:fr.r, c:ic.c, label:`Metric(${XLSX.utils.encode_cell({r:fr.r,c:ic.c})})=${metricName}`, type:'formulaMetric' });
+          }
+        }
+
+        // Build Name Manager entries
+        if (tdCells.length > 0) {
+          const tdRef = tdCells.map(c=>`'${sname}'!${XLSX.utils.encode_cell({r:c.r,c:c.c-1})}`).join(',');
+          definedNames.push({ name:`${snSafe}.${gg}.TD`, ref:tdRef, type:'TD' });
+        }
+        if (yCells.length > 0) {
+          const yRef = yCells.map((_,i)=>`'${sname}'!${XLSX.utils.encode_cell({r:_.r,c:range.e.c+1+i})}`).join(',');
+          if (xCells.length > 0) {
+            const xRef = xCells.map((x,i)=>`'${sname}'!${XLSX.utils.encode_cell({r:x.r,c:x.c-1})}`).join(',');
+            definedNames.push({ name:`${snSafe}.${gg}.TD`, ref: tdCells.map(c=>`'${sname}'!${XLSX.utils.encode_cell({r:c.r,c:c.c-1})}`).join(','), type:'TD' });
+            definedNames.push({ name:`${snSafe}.${gg}.Y`, ref:yRef, type:'Y', dimY:true });
+            definedNames.push({ name:`${snSafe}.${gg}.X`, ref:xRef, type:'X' });
+          } else {
+            definedNames.push({ name:`${snSafe}.${gg}.Y`, ref:yRef, type:'Y', dimY:true });
+          }
+        }
+        if (fmlyCells.length > 0) {
+          ggCount++;
+          const gg2 = String(ggCount).padStart(2,'0');
+          const fmlTD = fmlyCells.map(c=>`'${sname}'!${XLSX.utils.encode_cell({r:c.r,c:c.c-1})}`).join(',');
+          const fmlY = fmlyCells.map((c,i)=>`'${sname}'!${XLSX.utils.encode_cell({r:c.r,c:range.e.c+2+i})}`).join(',');
+          definedNames.push({ name:`${snSafe}.${gg2}.TD`, ref:fmlTD, type:'TD' });
+          definedNames.push({ name:`${snSafe}.${gg2}.Y`, ref:fmlY, type:'Y', dimY:false,
+            metrics: fmlyCells.map(c=>c.label.split('=')[1]||c.label) });
+        }
+
+        ggGroups.push({
+          sheet:sname, gg, type:'FIXED',
+          dimYParent, dimXParent, hasX,
+          inputRows, formulaRows, inputCols, formulaCols, secTitle
+        });
+
+      } else if (marker === '[OPEN]') {
+        // OPEN table
+        let dataRow = -1;
+        for (let dr=r+1; dr<=range.e.r; dr++) {
+          for (let c=1; c<=range.e.c; c++) {
+            if (isOlive((ws[XLSX.utils.encode_cell({r:dr,c})]||{}).s||{})) { dataRow=dr; break; }
+          }
+          if (dataRow>=0) break;
+        }
+        if (dataRow < 0) continue;
+
+        // Col headers from rows between marker and data row
+        const colHdrs = {};
+        for (let dr=r+1; dr<dataRow; dr++) {
+          let hasDataCol = false;
+          for (let c=2; c<=range.e.c; c++) {
+            const v = getCellValue(ws, XLSX.utils.encode_cell({r:dr,c}));
+            if (v) { colHdrs[c] = clean(String(v)); hasDataCol = true; }
+          }
+        }
+        // Build OX metrics
+        const oxMetrics = [];
+        for (let c=1; c<=range.e.c; c++) {
+          const hdr = colHdrs[c] || `Col${c}`;
+          oxMetrics.push(`${proj}_${tp}_${hdr}`);
+        }
+        const tdRef = `'${sname}'!${XLSX.utils.encode_cell({r:dataRow,c:1})}:${XLSX.utils.encode_cell({r:dataRow,c:range.e.c})}`;
+        const oxRef = `'${sname}'!${XLSX.utils.encode_cell({r:dataRow+1,c:1})}:${XLSX.utils.encode_cell({r:dataRow+1,c:range.e.c})}`;
+        definedNames.push({ name:`${snSafe}.${gg}.TD`, ref:tdRef, type:'TD' });
+        definedNames.push({ name:`${snSafe}.${gg}.OX`, ref:oxRef, type:'OX', metrics:oxMetrics });
+        ggGroups.push({ sheet:sname, gg, type:'OPEN', metrics:oxMetrics, secTitle });
+
+      } else if (marker === '[METRIC]') {
+        // METRIC block
+        const metrics = [];
+        for (let dr=r+1; dr<=range.e.r; dr++) {
+          const colA = getCellValue(ws, XLSX.utils.encode_cell({r:dr,c:0}));
+          if (colA && String(colA).trim().toUpperCase().replace(/\s/g,'').startsWith('[')) break;
+          // Check for olive cells
+          for (let c=0; c<=range.e.c; c++) {
+            if (isOlive((ws[XLSX.utils.encode_cell({r:dr,c})]||{}).s||{})) {
+              const lbl = getCellValue(ws, XLSX.utils.encode_cell({r:dr,c:0})) || `Row${dr+1}`;
+              const mn = `${proj}_${tp}_${clean(String(lbl))}`;
+              if (!metrics.includes(mn)) metrics.push(mn);
+              break;
+            }
+          }
+        }
+        if (metrics.length === 0) continue;
+        ggGroups.push({ sheet:sname, gg, type:'METRIC', metrics, secTitle });
+      }
+    }
+  }
+
+  ddDts[`${proj}_Number_19_2`] = {base:'number', settings:{digits_before:19,digits_after:2,thousand_sep:'Yes'}};
+  ddDts[`${proj}_Text_3000`]   = {base:'string', settings:{max_length:3000}};
+  ddDts[`${proj}_Date`]        = {base:'date',   settings:{mode:'Full Date (dd/mm/yyyy)'}};
+
+  return { proj, surveySheets, definedNames, ggGroups, ddEnums, ddDts };
+}
+
+// ══════════════════════════════════════════════════════════════
+// PART C — DATA DICTIONARY
+// ══════════════════════════════════════════════════════════════
+function runPartC(result, proj) {
+  const { ggGroups, ddEnums, ddDts } = result;
+  const elements = [];
+  let ref = 1;
+  const sheetsSeen = new Set();
+
+  const TEXT_KW = new Set(['name','address','email','telephone','tel','phone','company','description','licence','registration','contact','designation','officer','remark','comment','cis']);
+  const NUM_OVER = new Set(['aum','ratio','monies','amount','subscriptions','redemptions','assets']);
+  const ENUM_MAP = {'FundType':proj+'_Fund_Type','FundVehicle':proj+'_Fund_Vehicle','OtherJurisdictionsWhereCisIsOffered':proj+'_OtherJurisdictions'};
+
+  function camelWords(s) { return (s.replace(/_\d+$/,'').match(/[A-Z][a-z0-9]*/g)||[]).map(w=>w.toLowerCase()); }
+  function detectType(mn) {
+    const stripped = mn.startsWith(proj+'_') ? mn.substring(proj.length+1) : mn;
+    for (const [k,v] of Object.entries(ENUM_MAP)) if (stripped.includes(k)) return v;
+    const colPart = stripped.split('_').pop();
+    const cw = camelWords(colPart);
+    if (cw.some(w=>['date','year','month'].includes(w))) return proj+'_Date';
+    const hasTxt = cw.some(w=>TEXT_KW.has(w));
+    const hasNum = cw.some(w=>NUM_OVER.has(w));
+    if (hasTxt && !hasNum) return proj+'_Text_3000';
+    if (['InvestmentFocus','NameOfSingaporeOffice'].includes(colPart)) return proj+'_Text_3000';
+    return proj+'_Number_19_2';
+  }
+
+  for (const grp of ggGroups) {
+    let grpRef;
+    if (!sheetsSeen.has(grp.sheet)) {
+      grpRef = ref++;
+      elements.push({ ref:grpRef, parentRef:'', name:grp.sheet, type:'Group', ggType:'group' });
+      sheetsSeen.set ? sheetsSeen.add(grp.sheet) : sheetsSeen[grp.sheet]=grpRef;
+    }
+    grpRef = grpRef || elements.find(e=>e.name===grp.sheet&&e.type==='Group')?.ref;
+
+    const lr = ref++;
+    elements.push({ ref:lr, parentRef:grpRef, name:`${sanitise(grp.sheet)}.${grp.gg}`, type:'List', ggType:'list' });
+
+    if (grp.type === 'FIXED') {
+      // Determine if it's a dimension or formula group
+      const isDim = grp.dimYParent || grp.inputRows?.length > 0;
+      if (isDim && grp.dimYParent) {
+        elements.push({ ref:ref++, parentRef:lr, name:proj+'_Number', type:proj+'_Number_19_2', ggType:'dim' });
+        elements.push({ ref:ref++, parentRef:lr, name:grp.dimYParent, type:grp.dimYParent, ggType:'dim' });
+        if (grp.hasX && grp.dimXParent) {
+          elements.push({ ref:ref++, parentRef:lr, name:grp.dimXParent, type:grp.dimXParent, ggType:'dim' });
+        }
+      } else if (grp.formulaRows?.length > 0) {
+        for (const fr of grp.formulaRows) {
+          const mn = `${proj}_${tablePrefix(grp.secTitle)}_${fr.label}_Total`;
+          elements.push({ ref:ref++, parentRef:lr, name:mn, type:detectType(mn), ggType:'formula' });
+        }
+      }
+    } else if (grp.type === 'OPEN' || grp.type === 'METRIC') {
+      for (const mn of (grp.metrics||[])) {
+        elements.push({ ref:ref++, parentRef:lr, name:mn, type:detectType(mn), ggType:grp.type.toLowerCase() });
+      }
+    }
+  }
+
+  return { elements, ddEnums, ddDts };
+}
+
+// ══════════════════════════════════════════════════════════════
+// RENDER RESULTS
+// ══════════════════════════════════════════════════════════════
+function renderResults(result, ddResult, proj) {
+  const { definedNames, ggGroups, surveySheets } = result;
+  const { elements, ddEnums, ddDts } = ddResult;
+
+  // Stats
+  const statsHtml = `
+    <div class="stats-bar">
+      <div class="stat-card"><div class="stat-num stat-accent">${surveySheets.length}</div><div class="stat-lbl">Survey Sheets</div></div>
+      <div class="stat-card"><div class="stat-num stat-violet">${ggGroups.length}</div><div class="stat-lbl">GG Groups</div></div>
+      <div class="stat-card"><div class="stat-num stat-green">${definedNames.length}</div><div class="stat-lbl">Name Manager</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:var(--warn)">${elements.filter(e=>e.type!=='Group'&&e.type!=='List').length}</div><div class="stat-lbl">Elements</div></div>
+    </div>`;
+
+  // Per-sheet summary
+  let sheetHtml = '';
+  for (const sname of surveySheets) {
+    const sheetGGs = ggGroups.filter(g=>g.sheet===sname);
+    if (!sheetGGs.length) continue;
+    const ggRows = sheetGGs.map(g => {
+      const typeMap = {FIXED:'badge-dim',OPEN:'badge-open',METRIC:'badge-metric'};
+      const badgeCls = typeMap[g.type]||'badge-dim';
+      return `<tr>
+        <td class="mono">${sanitise(sname)}.${g.gg}</td>
+        <td><span class="badge ${badgeCls}">${g.type}</span></td>
+        <td style="color:var(--muted2);font-size:11px;max-width:320px;word-break:break-all">${g.secTitle||''}</td>
+        <td class="mono" style="color:var(--accent)">${g.type==='FIXED'?(g.dimYParent||'—'):''}</td>
+      </tr>`;
+    }).join('');
+    sheetHtml += `<details class="result-block" open>
+      <summary>${sname} <span class="row-count">${sheetGGs.length} GG${sheetGGs.length>1?'s':''}</span></summary>
+      <div class="detail-body">
+        <table class="data-table" style="margin:0">
+          <thead><tr><th>GG Key</th><th>Type</th><th>Section Title</th><th>Dim Y Parent</th></tr></thead>
+          <tbody>${ggRows}</tbody>
+        </table>
+      </div>
+    </details>`;
+  }
+
+  document.getElementById('overviewContent').innerHTML = statsHtml + sheetHtml;
+
+  // Name Manager tab
+  const nmRows = definedNames.map((dn,i) => `<tr>
+    <td class="mono" style="color:var(--accent)">${dn.name}</td>
+    <td><span class="badge" style="background:rgba(14,165,233,.1);color:var(--accent)">${dn.type}</span></td>
+    <td class="mono" style="font-size:10.5px;color:var(--muted2);word-break:break-all">${dn.ref}</td>
+  </tr>`).join('');
+  document.getElementById('namemgrContent').innerHTML = `
+    <table class="data-table">
+      <thead><tr><th>Key</th><th>Code</th><th>Refers To</th></tr></thead>
+      <tbody>${nmRows||'<tr><td colspan=3 style="color:var(--muted);text-align:center;padding:20px">No entries</td></tr>'}</tbody>
+    </table>`;
+
+  // Elements tab
+  const elemRows = elements.map(e => {
+    const typeCls = e.type==='Group'?'badge-group':e.type==='List'?'badge-list':
+                    e.ggType==='dim'?'badge-dim':e.ggType==='formula'?'badge-formula':'badge-open';
+    const indent = e.type==='List'?'padding-left:14px':e.type!=='Group'?'padding-left:28px':'';
+    return `<tr>
+      <td style="color:var(--muted)">${e.ref}</td>
+      <td style="color:var(--muted)">${e.parentRef||''}</td>
+      <td class="mono" style="${indent}">${e.name}</td>
+      <td><span class="badge ${typeCls}">${e.type}</span></td>
+    </tr>`;
+  }).join('');
+  document.getElementById('elementsContent').innerHTML = `
+    <table class="data-table">
+      <thead><tr><th>Ref</th><th>Parent</th><th>Name</th><th>Type</th></tr></thead>
+      <tbody>${elemRows||'<tr><td colspan=4 style="color:var(--muted);text-align:center;padding:20px">No elements</td></tr>'}</tbody>
+    </table>`;
+
+  // Enumerations tab
+  const enumRows = ddEnums.map(e => `<tr>
+    <td class="mono" style="color:var(--accent2)">${e.enumeration}</td>
+    <td class="mono">${e.key}</td>
+    <td>${e.label}</td>
+  </tr>`).join('');
+  document.getElementById('enumsContent').innerHTML = `
+    <table class="data-table">
+      <thead><tr><th>Enumeration</th><th>Key</th><th>Label</th></tr></thead>
+      <tbody>${enumRows||'<tr><td colspan=3 style="color:var(--muted);text-align:center;padding:20px">No enumerations</td></tr>'}</tbody>
+    </table>`;
+
+  // Data Types tab
+  const dtRows = Object.entries(ddDts).map(([name,{base,settings}]) => `<tr>
+    <td class="mono" style="color:var(--success)">${name}</td>
+    <td><span class="badge badge-dim">${base}</span></td>
+    <td style="color:var(--muted2);font-size:11.5px">${Object.entries(settings).map(([k,v])=>`${k}=${v}`).join(', ')||'—'}</td>
+  </tr>`).join('');
+  document.getElementById('datatypesContent').innerHTML = `
+    <table class="data-table">
+      <thead><tr><th>Name</th><th>Base Type</th><th>Settings</th></tr></thead>
+      <tbody>${dtRows||'<tr><td colspan=3 style="color:var(--muted);text-align:center;padding:20px">No data types</td></tr>'}</tbody>
+    </table>`;
+}
+
+// ══════════════════════════════════════════════════════════════
+// DOWNLOADS — Build output xlsx files with XLSX.js
+// ══════════════════════════════════════════════════════════════
+function downloadProcessed() {
+  if (!pipelineResult) return;
+  // Build a summary workbook (processed annotations as a new sheet)
+  const wb = XLSX.utils.book_new();
+  const { definedNames, ggGroups } = pipelineResult;
+
+  // Name Manager sheet
+  const nmData = [['Key','Code','Refers To']];
+  for (const dn of definedNames) nmData.push([dn.name, dn.type, dn.ref]);
+  const nmSheet = XLSX.utils.aoa_to_sheet(nmData);
+  XLSX.utils.book_append_sheet(wb, nmSheet, 'NameManager');
+
+  // GG Groups sheet
+  const ggData = [['Sheet','GG','Type','Section Title','Dim Y Parent','Dim X Parent']];
+  for (const g of ggGroups) ggData.push([g.sheet,g.gg,g.type,g.secTitle||'',g.dimYParent||'',g.dimXParent||'']);
+  const ggSheet = XLSX.utils.aoa_to_sheet(ggData);
+  XLSX.utils.book_append_sheet(wb, ggSheet, 'GGGroups');
+
+  XLSX.writeFile(wb, (pipelineResult.proj||'Project')+'_Processed.xlsx');
+}
+
+function downloadDictionary() {
+  if (!pipelineResult?.dd) return;
+  const { elements, ddEnums, ddDts } = pipelineResult.dd;
+  const proj = pipelineResult.proj;
+  const wb = XLSX.utils.book_new();
+
+  // Schema
+  const schemaSheet = XLSX.utils.aoa_to_sheet([['Name *','Description'],[ proj,'']]);
+  XLSX.utils.book_append_sheet(wb, schemaSheet, 'Schema');
+
+  // Enumerations
+  const enumData = [['Enumeration *','Key *','Label *','Parent Key']];
+  for (const e of ddEnums) enumData.push([e.enumeration,e.key,e.label,'']);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(enumData), 'Enumerations');
+
+  // Data Types
+  const dtData = [['Name *','Base Data Type *','Max Length','Digits Before','Digits After','Thousand Separator','Mode','Use Database Max']];
+  for (const [name,{base,settings}] of Object.entries(ddDts)) {
+    dtData.push([name, base, settings.max_length||'', settings.digits_before||'', settings.digits_after||'', settings.thousand_sep||'', settings.mode||'', settings.use_db_max||'']);
+  }
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dtData), 'Data Types');
+
+  // Elements
+  const elemData = [['Ref *','Parent Ref *','Name *','Type *']];
+  for (const e of elements) elemData.push([e.ref,e.parentRef,e.name,e.type]);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(elemData), 'Elements');
+
+  // Rules (empty)
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Rule ID *','Display Text','Type *']]), 'Rules');
+
+  XLSX.writeFile(wb, proj+'_DataDictionary.xlsx');
+}
+
+// ══════════════════════════════════════════════════════════════
+// CHAT — Claude API integration
+// ══════════════════════════════════════════════════════════════
+function saveApiKey() {
+  const val = document.getElementById('apiKey').value.trim();
+  if (!val || val.startsWith('•')) return;
+  apiKey = val;
+  localStorage.setItem('dmg_apikey', val);
+  document.getElementById('apiKey').value = '••••••••••••••••';
+  document.getElementById('apiStatus').textContent = 'API key saved ✓';
+  document.getElementById('apiStatus').style.color = 'var(--success)';
+  document.getElementById('apiKeyBtn').classList.add('active');
+}
+
+function injectPipelineContext(result, ddResult, proj) {
+  const { definedNames, ggGroups, surveySheets } = result;
+  const { elements, ddEnums, ddDts } = ddResult;
+
+  const summary = [
+    `Project: ${proj}`,
+    `Survey sheets processed: ${surveySheets.join(', ')}`,
+    `GG Groups (${ggGroups.length} total):`,
+    ...ggGroups.map(g=>`  - ${sanitise(g.sheet)}.${g.gg} [${g.type}] section="${g.secTitle}" dimY="${g.dimYParent||'none'}" dimX="${g.dimXParent||'none'}"`),
+    `Name Manager entries (${definedNames.length} total):`,
+    ...definedNames.slice(0,20).map(d=>`  ${d.name} = ${d.ref.substring(0,80)}`),
+    `Elements (${elements.length} total, showing first 30):`,
+    ...elements.slice(0,30).map(e=>`  [${e.ref}] parent=${e.parentRef} name=${e.name} type=${e.type}`),
+    `Enumerations: ${ddEnums.length} entries`,
+    `Data Types: ${Object.keys(ddDts).join(', ')}`,
+  ].join('\n');
+
+  chatHistory = [{
+    role: 'user',
+    content: `Here is the DimMetric Generator pipeline output for project ${proj}:\n\n${summary}\n\nI'll ask you questions about this output.`
+  }, {
+    role: 'assistant',
+    content: `I've loaded the pipeline output for **${proj}**. I can see ${ggGroups.length} GG groups across ${surveySheets.length} sheets, with ${definedNames.length} Name Manager entries and ${elements.length} Elements in the Data Dictionary. What would you like to know?`
+  }];
+  addMessage('ai', `✅ Pipeline complete for **${proj}**! I've loaded all the results — ${ggGroups.length} GG groups, ${definedNames.length} Name Manager entries, ${elements.length} Elements. Ask me anything about the output.`);
+}
+
+function addMessage(role, text) {
+  const msgs = document.getElementById('chatMessages');
+  const time = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  // Simple markdown: **bold** and \n → <br>
+  const html = text.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');
+  div.innerHTML = `<div class="msg-bubble">${html}</div><div class="msg-time">${time}</div>`;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+  return div;
+}
+
+async function sendChat() {
+  if (!apiKey) {
+    addMessage('ai','⚠️ Please enter your Claude API key in the sidebar first.');
+    return;
+  }
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if (!text) return;
+
+  addMessage('user', text);
+  input.value = '';
+  input.style.height = 'auto';
+  document.getElementById('chatSend').disabled = true;
+
+  chatHistory.push({ role:'user', content: text });
+
+  const thinkDiv = addMessage('ai', '_Thinking…_');
+  thinkDiv.querySelector('.msg-bubble').classList.add('thinking');
+
+  const systemPrompt = `You are a DimMetric Generator expert assistant. You help users understand the output of the DimMetric pipeline which processes Excel survey forms into dimensional metadata and data dictionaries.
+
+Key concepts:
+- Parts A/B/C pipeline: A=survey form design, B=processor output (Dim Y/X/Metric labels + Name Manager), C=Data Dictionary
+- GG Types: FIXED (dimension groups with Dim= cells → Metric+DimY+DimX parents), OPEN (individual metrics per col), METRIC (individual metric labels)
+- The Y Name Manager code can be a DIMENSION group (Y has Dim= blue cells) OR FORMULA group (Y has Metric(CellRef)= pink cells)
+- FIXED Dimension GGs produce: proj_Number, DimY parent (self-referential), DimX parent (if X exists)
+- FIXED Formula GGs produce: individual formula metric names only
+- OPEN/METRIC GGs produce: individual metric names with detected types
+
+Be concise, accurate, and reference specific GG names or element names from the loaded data when answering.`;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1000,
+        system: systemPrompt,
+        messages: chatHistory.filter(m => m.role !== 'system')
+      })
+    });
+    const data = await res.json();
+    const reply = data.content?.[0]?.text || (data.error ? '⚠️ API error: ' + (data.error.message||JSON.stringify(data.error)) : '⚠️ No response');
+    thinkDiv.querySelector('.msg-bubble').classList.remove('thinking');
+    thinkDiv.querySelector('.msg-bubble').innerHTML = reply.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');
+    chatHistory.push({ role:'assistant', content: reply });
+  } catch(e) {
+    thinkDiv.querySelector('.msg-bubble').textContent = '⚠️ Network error: ' + e.message;
+  }
+  document.getElementById('chatSend').disabled = false;
+}
+
+// ══════════════════════════════════════════════════════════════
+// UI HELPERS
+// ══════════════════════════════════════════════════════════════
+function switchTab(name) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  event.target.classList.add('active');
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 100) + 'px';
+}
+</script>
+</body>
+</html>
